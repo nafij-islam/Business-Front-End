@@ -128,24 +128,40 @@ export default function LoginPage() {
               </label>
             </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full rounded-lg py-2.5 px-4 font-semibold text-sm text-white shadow-md transition disabled:opacity-50 mt-2"
-              style={{
-                backgroundColor: 'var(--theme-primary, #0d9488)',
-              }}
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  <span>Verifying Session...</span>
-                </div>
-              ) : (
-                'Sign In to Management Console'
-              )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full rounded-lg py-2.5 px-4 font-semibold text-sm text-white shadow-md transition disabled:opacity-50 mt-2 hover:opacity-90 active:scale-[0.99]"
+                style={{
+                  backgroundColor: 'var(--theme-primary, #0d9488)',
+                }}
+              >
+                {isLoading ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    <span>Verifying Session...</span>
+                  </div>
+                ) : (
+                  'Sign In to Management Console'
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  login('demo-access-token', 'demo-refresh-token', {
+                    id: 'demo-user-id',
+                    firstName: 'Business',
+                    lastName: 'Owner',
+                    email: 'admin@apexenterprise.com',
+                    role: 'OWNER',
+                  });
+                }}
+                className="w-full rounded-lg py-2 px-4 font-medium text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition text-center border border-slate-200 dark:border-slate-700 mt-1"
+              >
+                👁️ Explore All Designs (Instant Demo Preview)
+              </button>
+            </form>
         </div>
 
         {/* Footer */}
