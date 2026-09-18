@@ -97,7 +97,8 @@ export default function ReportsPage() {
   });
 
   const handleExport = (type: 'sales' | 'inventory') => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+    const baseUrl =
+      process.env.NEXT_PUBLIC_API_URL || 'https://business-back-end-5kc1.vercel.app/api/v1';
     window.open(`${baseUrl}/export/${type}`, '_blank');
   };
 

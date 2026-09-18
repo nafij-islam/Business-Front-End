@@ -146,21 +146,6 @@ export default function LoginPage() {
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  login('demo-access-token', 'demo-refresh-token', {
-                    id: 'demo-user-id',
-                    firstName: 'Business',
-                    lastName: 'Owner',
-                    email: 'admin@apexenterprise.com',
-                    role: 'OWNER',
-                  });
-                }}
-                className="w-full rounded-lg py-2 px-4 font-medium text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition text-center border border-slate-200 dark:border-slate-700 mt-1"
-              >
-                👁️ Explore All Designs (Instant Demo Preview)
-              </button>
             </form>
         </div>
 

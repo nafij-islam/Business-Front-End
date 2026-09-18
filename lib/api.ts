@@ -1,6 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'https://business-back-end-5kc1.vercel.app/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
