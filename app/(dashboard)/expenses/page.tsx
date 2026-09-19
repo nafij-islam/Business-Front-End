@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -31,14 +31,17 @@ import {
 
 interface ExpenseItem {
   _id: string;
-  title: string;
   amount: number;
   category: { _id: string; name: string };
   paymentMethod: string;
-  date: string;
+  expenseDate?: string;
+  date?: string;
+  createdAt?: string;
   reference?: string;
+  note?: string;
   notes?: string;
-  recordedBy?: { name: string };
+  title?: string;
+  createdBy?: { firstName?: string; lastName?: string; name?: string };
 }
 
 interface ExpenseCategory {
@@ -68,7 +71,7 @@ export default function ExpensesPage() {
     title: '',
     amount: 0,
     categoryId: '',
-    paymentMethod: 'cash',
+    paymentMethod: 'CASH',
     date: new Date().toISOString().split('T')[0],
     reference: '',
     notes: '',
@@ -80,9 +83,9 @@ export default function ExpensesPage() {
     queryFn: async () => {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
-      if (selectedCategory) params.categoryId = selectedCategory;
+      if (selectedCategory) params.category = selectedCategory;
       const res: any = await api.get('/expenses', { params });
-      return res.data;
+      return extractPaginationData<ExpenseItem>(res);
     },
   });
 
@@ -130,7 +133,7 @@ export default function ExpensesPage() {
       title: '',
       amount: 0,
       categoryId: '',
-      paymentMethod: 'cash',
+      paymentMethod: 'CASH',
       date: new Date().toISOString().split('T')[0],
       reference: '',
       notes: '',
@@ -139,16 +142,19 @@ export default function ExpensesPage() {
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expenseForm.title || !expenseForm.categoryId || expenseForm.amount <= 0) return;
+    if (!expenseForm.categoryId || expenseForm.amount <= 0) return;
+
+    const fullNote = [expenseForm.title.trim(), expenseForm.notes.trim()]
+      .filter(Boolean)
+      .join(' - ');
 
     createExpenseMutation.mutate({
-      title: expenseForm.title,
+      category: expenseForm.categoryId,
       amount: Number(expenseForm.amount),
-      categoryId: expenseForm.categoryId,
       paymentMethod: expenseForm.paymentMethod,
-      date: expenseForm.date,
-      reference: expenseForm.reference || undefined,
-      notes: expenseForm.notes || undefined,
+      expenseDate: expenseForm.date ? new Date(expenseForm.date) : new Date(),
+      reference: expenseForm.reference ? expenseForm.reference.trim() : undefined,
+      note: fullNote || undefined,
     });
   };
 
@@ -156,7 +162,19 @@ export default function ExpensesPage() {
   const totalCount = expensesData?.total || 0;
   const totalPages = Math.ceil(totalCount / limit) || 1;
 
-  const breakdown = summaryData?.categoryBreakdown || [];
+  const breakdown = Array.isArray(summaryData)
+    ? summaryData
+    : summaryData?.categoryBreakdown || [];
+
+  const totalOperatingExpenses = breakdown.reduce(
+    (sum: number, b: any) => sum + (Number(b.totalAmount) || 0),
+    0
+  ) || (expensesData as any)?.extra?.totalAmount || 0;
+
+  const totalVouchersCount = breakdown.reduce(
+    (sum: number, b: any) => sum + (Number(b.count) || 0),
+    0
+  ) || totalCount;
 
   return (
     <div className="space-y-6">
@@ -198,8 +216,8 @@ export default function ExpensesPage() {
         <div className="lg:col-span-4 space-y-4">
           <StatCard
             title="Total Operating Expenses"
-            value={formatCurrency(summaryData?.totalExpenses || 0, currency)}
-            subtitle={`Across ${summaryData?.count || 0} recorded vouchers`}
+            value={formatCurrency(totalOperatingExpenses, currency)}
+            subtitle={`Across ${totalVouchersCount} recorded vouchers`}
             icon={TrendingDown}
             color="rose"
           />
@@ -241,7 +259,7 @@ export default function ExpensesPage() {
                     cx="50%"
                     cy="50%"
                     outerRadius={80}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                   >
                     {breakdown.map((_: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -330,13 +348,12 @@ export default function ExpensesPage() {
                     className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="py-3.5 px-4 sm:px-6 text-xs text-slate-500 font-mono">
-                      {formatDate(item.date)}
+                      {formatDate(item.expenseDate || item.date || item.createdAt)}
                     </td>
                     <td className="py-3.5 px-4">
-                      <p className="font-semibold text-slate-900 dark:text-white">{item.title}</p>
-                      {item.notes && (
-                        <p className="text-xs text-slate-400 mt-0.5">{item.notes}</p>
-                      )}
+                      <p className="font-semibold text-slate-900 dark:text-white">
+                        {item.note || item.notes || item.title || 'Operating Expense'}
+                      </p>
                     </td>
                     <td className="py-3.5 px-4">
                       <Badge variant="purple" size="sm">
@@ -347,13 +364,17 @@ export default function ExpensesPage() {
                       {formatCurrency(item.amount, currency)}
                     </td>
                     <td className="py-3.5 px-4 text-xs font-medium text-slate-600 dark:text-slate-300">
-                      {item.paymentMethod.replace(/_/g, ' ').toUpperCase()}
+                      {(item.paymentMethod || 'CASH').replace(/_/g, ' ').toUpperCase()}
                     </td>
                     <td className="py-3.5 px-4 text-xs font-mono text-slate-400">
                       {item.reference || '-'}
                     </td>
                     <td className="py-3.5 px-4 sm:px-6 text-xs text-slate-500">
-                      {item.recordedBy?.name || 'Admin'}
+                      {item.createdBy
+                        ? [item.createdBy.firstName, item.createdBy.lastName].filter(Boolean).join(' ') ||
+                          item.createdBy.name ||
+                          'System'
+                        : 'System'}
                     </td>
                   </tr>
                 ))
@@ -403,7 +424,7 @@ export default function ExpensesPage() {
         <form onSubmit={handleCreateSubmit} className="space-y-3.5 text-xs">
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Expense Title <span className="text-rose-500">*</span>
+              Expense Description / Purpose <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
@@ -411,7 +432,7 @@ export default function ExpensesPage() {
               placeholder="e.g. Electricity Bill, Store Rent, Packaging Materials"
               value={expenseForm.title}
               onChange={(e) => setExpenseForm({ ...expenseForm, title: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
             />
           </div>
 
@@ -425,9 +446,9 @@ export default function ExpensesPage() {
                 step="0.01"
                 min="0.01"
                 required
-                value={expenseForm.amount}
+                value={expenseForm.amount || ''}
                 onChange={(e) => setExpenseForm({ ...expenseForm, amount: Number(e.target.value) })}
-                className="w-full px-3 py-2 font-bold text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                className="w-full px-3 py-2 font-bold text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
               />
             </div>
 
@@ -439,7 +460,7 @@ export default function ExpensesPage() {
                 required
                 value={expenseForm.categoryId}
                 onChange={(e) => setExpenseForm({ ...expenseForm, categoryId: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
               >
                 <option value="">-- Choose Category --</option>
                 {categories?.map((cat) => (
@@ -459,13 +480,14 @@ export default function ExpensesPage() {
               <select
                 value={expenseForm.paymentMethod}
                 onChange={(e) => setExpenseForm({ ...expenseForm, paymentMethod: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
               >
-                <option value="cash">Cash</option>
-                <option value="bank_transfer">Bank Transfer</option>
-                <option value="card">Company Card</option>
-                <option value="mobile_money">Mobile Wallet</option>
-                <option value="other">Other</option>
+                <option value="CASH">Cash</option>
+                <option value="BANK_TRANSFER">Bank Transfer</option>
+                <option value="BKASH">bKash</option>
+                <option value="NAGAD">Nagad</option>
+                <option value="CARD">Card</option>
+                <option value="OTHER">Other</option>
               </select>
             </div>
 
@@ -478,7 +500,7 @@ export default function ExpensesPage() {
                 required
                 value={expenseForm.date}
                 onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
               />
             </div>
           </div>
@@ -492,19 +514,19 @@ export default function ExpensesPage() {
               placeholder="e.g. REC-89211"
               value={expenseForm.reference}
               onChange={(e) => setExpenseForm({ ...expenseForm, reference: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
             />
           </div>
 
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Notes
+              Additional Notes
             </label>
             <textarea
               rows={2}
               value={expenseForm.notes}
               onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
             />
           </div>
 
@@ -543,14 +565,14 @@ export default function ExpensesPage() {
               placeholder="New category name..."
               value={newCategoryName}
               onChange={(e) => setNewCategoryName(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+              className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
             />
             <Button
               variant="primary"
               size="sm"
               disabled={!newCategoryName.trim()}
               isLoading={createCategoryMutation.isPending}
-              onClick={() => createCategoryMutation.mutate(newCategoryName)}
+              onClick={() => createCategoryMutation.mutate(newCategoryName.trim())}
             >
               Add
             </Button>

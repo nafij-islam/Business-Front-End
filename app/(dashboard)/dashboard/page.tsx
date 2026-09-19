@@ -324,7 +324,7 @@ export default function DashboardPage() {
                   <div>
                     <p className="text-xs font-semibold text-slate-800">{purchase.purchaseNumber}</p>
                     <p className="text-[11px] text-slate-400">
-                      {purchase.supplier?.name} &bull; {formatDate(purchase.purchaseDate)}
+                      {purchase.supplier?.companyName || purchase.supplier?.name || 'Unknown Supplier'} &bull; {formatDate(purchase.purchaseDate)}
                     </p>
                   </div>
                   <div className="text-right">

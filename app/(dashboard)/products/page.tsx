@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,8 @@ import {
 interface Product {
   _id: string;
   name: string;
-  sku: string;
+  SKU?: string;
+  sku?: string;
   barcode?: string;
   category?: { _id: string; name: string };
   brand?: { _id: string; name: string };
@@ -36,10 +37,12 @@ interface Product {
   purchasePrice: number;
   sellingPrice: number;
   currentStock: number;
-  lowStockAlert: number;
+  lowStockThreshold?: number;
+  lowStockAlert?: number;
   isActive: boolean;
+  description?: string;
   notes?: string;
-  customAttributes?: { key: string; value: string }[];
+  customAttributes?: Record<string, any> | { key: string; value: string }[];
 }
 
 interface Category {
@@ -102,19 +105,19 @@ export default function ProductsPage() {
     queryFn: async () => {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
-      if (selectedCategory) params.categoryId = selectedCategory;
-      if (selectedBrand) params.brandId = selectedBrand;
+      if (selectedCategory) params.category = selectedCategory;
+      if (selectedBrand) params.brand = selectedBrand;
       if (stockStatus === 'archived') {
-        params.isActive = false;
+        params.isArchived = true;
       } else if (stockStatus === 'low_stock') {
-        params.lowStockOnly = true;
+        params.stockStatus = 'lowStock';
       } else if (stockStatus === 'out_of_stock') {
-        params.outOfStockOnly = true;
+        params.stockStatus = 'outOfStock';
       } else if (stockStatus === 'in_stock') {
-        params.inStockOnly = true;
+        params.stockStatus = 'inStock';
       }
       const res: any = await api.get('/products', { params });
-      return res.data;
+      return extractPaginationData<Product>(res);
     },
   });
 
@@ -123,7 +126,7 @@ export default function ProductsPage() {
     queryKey: ['categories'],
     queryFn: async () => {
       const res: any = await api.get('/categories');
-      return res.data || [];
+      return extractPaginationData<Category>(res).items;
     },
   });
 
@@ -131,7 +134,7 @@ export default function ProductsPage() {
     queryKey: ['brands'],
     queryFn: async () => {
       const res: any = await api.get('/brands');
-      return res.data || [];
+      return extractPaginationData<Brand>(res).items;
     },
   });
 
@@ -139,7 +142,7 @@ export default function ProductsPage() {
     queryKey: ['units'],
     queryFn: async () => {
       const res: any = await api.get('/units');
-      return res.data || [];
+      return extractPaginationData<Unit>(res).items;
     },
   });
 
@@ -213,19 +216,26 @@ export default function ProductsPage() {
 
   const handleOpenEditModal = (product: Product) => {
     setEditingProduct(product);
+    let attrs: { key: string; value: string }[] = [];
+    if (Array.isArray(product.customAttributes)) {
+      attrs = product.customAttributes as { key: string; value: string }[];
+    } else if (product.customAttributes && typeof product.customAttributes === 'object') {
+      attrs = Object.entries(product.customAttributes).map(([k, v]) => ({ key: k, value: String(v) }));
+    }
+
     setFormData({
       name: product.name,
-      sku: product.sku,
+      sku: product.SKU || product.sku || '',
       barcode: product.barcode || '',
       categoryId: product.category?._id || '',
       brandId: product.brand?._id || '',
       unitId: product.unit?._id || '',
       purchasePrice: product.purchasePrice,
       sellingPrice: product.sellingPrice,
-      openingStock: 0, // Opening stock only applicable on creation
-      lowStockAlert: product.lowStockAlert,
-      notes: product.notes || '',
-      customAttributes: product.customAttributes || [],
+      openingStock: 0,
+      lowStockAlert: product.lowStockThreshold ?? product.lowStockAlert ?? 5,
+      notes: product.description || product.notes || '',
+      customAttributes: attrs,
     });
     setIsProductModalOpen(true);
   };
@@ -233,18 +243,27 @@ export default function ProductsPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const payload: any = {
-      name: formData.name,
-      sku: formData.sku,
-      barcode: formData.barcode || undefined,
+      name: formData.name.trim(),
+      SKU: formData.sku.trim(),
+      barcode: formData.barcode?.trim() || undefined,
       category: formData.categoryId || undefined,
       brand: formData.brandId || undefined,
       unit: formData.unitId || undefined,
       purchasePrice: Number(formData.purchasePrice),
       sellingPrice: Number(formData.sellingPrice),
-      lowStockAlert: Number(formData.lowStockAlert),
-      notes: formData.notes || undefined,
-      customAttributes: formData.customAttributes.filter((attr) => attr.key.trim() && attr.value.trim()),
+      lowStockThreshold: Number(formData.lowStockAlert),
+      description: formData.notes?.trim() || undefined,
     };
+
+    if (formData.customAttributes && formData.customAttributes.length > 0) {
+      const attrsObj: Record<string, any> = {};
+      formData.customAttributes.forEach((attr) => {
+        if (attr.key?.trim()) attrsObj[attr.key.trim()] = attr.value;
+      });
+      if (Object.keys(attrsObj).length > 0) {
+        payload.customAttributes = attrsObj;
+      }
+    }
 
     if (editingProduct) {
       updateProductMutation.mutate({ id: editingProduct._id, data: payload });
@@ -274,7 +293,7 @@ export default function ProductsPage() {
     });
   };
 
-  const products: Product[] = productsData?.items || productsData?.products || [];
+  const products: Product[] = productsData?.items || (productsData as any)?.products || [];
   const total = productsData?.total || 0;
   const totalPages = Math.ceil(total / limit) || 1;
 
@@ -424,7 +443,8 @@ export default function ProductsPage() {
                 </tr>
               ) : (
                 products.map((product) => {
-                  const isLow = product.currentStock > 0 && product.currentStock <= product.lowStockAlert;
+                  const lowThreshold = product.lowStockThreshold ?? product.lowStockAlert ?? 5;
+                  const isLow = product.currentStock > 0 && product.currentStock <= lowThreshold;
                   const isOut = product.currentStock <= 0;
 
                   return (
@@ -437,16 +457,16 @@ export default function ProductsPage() {
                           <p className="font-semibold text-slate-900 dark:text-white">
                             {product.name}
                           </p>
-                          {product.notes && (
+                          {(product.description || product.notes) && (
                             <p className="text-xs text-slate-400 truncate max-w-xs mt-0.5">
-                              {product.notes}
+                              {product.description || product.notes}
                             </p>
                           )}
                         </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-xs">
                         <div className="text-slate-900 dark:text-slate-200 font-medium">
-                          {product.sku}
+                          {product.SKU || product.sku}
                         </div>
                         {product.barcode && (
                           <div className="text-slate-400 flex items-center gap-1 mt-0.5">
@@ -485,7 +505,7 @@ export default function ProductsPage() {
                         </span>
                         {isLow && (
                           <span className="block text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
-                            Alert &le; {product.lowStockAlert}
+                            Alert &le; {lowThreshold}
                           </span>
                         )}
                       </td>

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, downloadExportFile } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import Link from 'next/link';
 export default function ReportsPage() {
   const { settings } = useBusinessSettings();
   const currency = settings?.localization?.currencySymbol || '$';
+  const [exportingType, setExportingType] = useState<string | null>(null);
 
   // Date Presets
   const [preset, setPreset] = useState<'today' | 'last_7_days' | 'this_month' | 'this_year' | 'custom'>('this_month');
@@ -96,10 +97,15 @@ export default function ReportsPage() {
     },
   });
 
-  const handleExport = (type: 'sales' | 'inventory') => {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_API_URL || 'https://business-back-end-5kc1.vercel.app/api/v1';
-    window.open(`${baseUrl}/export/${type}`, '_blank');
+  const handleExport = async (type: 'sales' | 'inventory') => {
+    try {
+      setExportingType(type);
+      await downloadExportFile(`/export/${type}?format=csv`, `${type}-report.csv`);
+    } catch (err: any) {
+      alert(err?.response?.data?.message || err?.message || 'Export failed');
+    } finally {
+      setExportingType(null);
+    }
   };
 
   return (
@@ -124,10 +130,20 @@ export default function ReportsPage() {
           <Button
             variant="outline"
             size="sm"
+            isLoading={exportingType === 'sales'}
             onClick={() => handleExport('sales')}
           >
             <Download className="w-4 h-4 mr-1.5" />
             Export Sales CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            isLoading={exportingType === 'inventory'}
+            onClick={() => handleExport('inventory')}
+          >
+            <Download className="w-4 h-4 mr-1.5" />
+            Export Inventory CSV
           </Button>
         </div>
       </div>

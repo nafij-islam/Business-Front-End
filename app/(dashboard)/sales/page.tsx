@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -28,32 +28,40 @@ import {
 } from 'lucide-react';
 
 interface SaleItem {
-  product: { _id: string; name: string; sku: string };
+  product: { _id: string; name: string; sku?: string; SKU?: string };
+  productName?: string;
+  productSku?: string;
   quantity: number;
-  unitPrice: number;
-  discount: number;
-  total: number;
-  purchaseCostAtSale: number;
+  unitPrice?: number;
+  sellingPrice?: number;
+  discount?: number;
+  total?: number;
+  subtotal?: number;
+  purchaseCostAtSale?: number;
 }
 
 interface Sale {
   _id: string;
-  invoiceNumber: string;
+  saleNumber?: string;
+  invoiceNumber?: string;
   customer?: { _id: string; name: string; phone?: string; email?: string };
   customerName?: string;
   customerPhone?: string;
   items: SaleItem[];
   subtotal: number;
   discount: number;
-  discountType: 'fixed' | 'percentage';
-  taxAmount: number;
-  taxRate: number;
-  totalAmount: number;
+  discountType?: 'fixed' | 'percentage';
+  tax?: number;
+  taxAmount?: number;
+  taxRate?: number;
+  grandTotal?: number;
+  totalAmount?: number;
   paidAmount: number;
   dueAmount: number;
-  paymentStatus: 'paid' | 'partial' | 'unpaid';
-  status: 'completed' | 'cancelled' | 'refunded' | 'partially_refunded';
+  paymentStatus: string;
+  status: string;
   notes?: string;
+  saleDate?: string;
   createdAt: string;
 }
 
@@ -119,9 +127,9 @@ export default function SalesPage() {
     queryFn: async () => {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
-      if (paymentStatusFilter) params.paymentStatus = paymentStatusFilter;
+      if (paymentStatusFilter) params.status = paymentStatusFilter.toUpperCase();
       const res: any = await api.get('/sales', { params });
-      return res.data;
+      return extractPaginationData<Sale>(res);
     },
   });
 
@@ -130,7 +138,7 @@ export default function SalesPage() {
     queryKey: ['products-for-sales'],
     queryFn: async () => {
       const res: any = await api.get('/products', { params: { limit: 500, isActive: true } });
-      return res.data?.items || [];
+      return extractPaginationData<ProductItem>(res).items;
     },
   });
 
@@ -139,7 +147,7 @@ export default function SalesPage() {
     queryKey: ['customers-for-sales'],
     queryFn: async () => {
       const res: any = await api.get('/customers', { params: { limit: 200 } });
-      return res.data?.items || [];
+      return extractPaginationData<CustomerItem>(res).items;
     },
   });
 
@@ -251,24 +259,22 @@ export default function SalesPage() {
 
     const payload: any = {
       items: cartItems.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: item.price,
-        discount: 0,
+        product: item.productId,
+        quantity: Number(item.quantity),
+        sellingPrice: Number(item.price),
       })),
-      discount: discountAmount,
-      discountType,
-      taxRate: Number(taxRate) || 0,
+      discount: Math.round(Number(discountAmount || 0) * 100) / 100,
+      tax: Math.round(Number(taxAmount || 0) * 100) / 100,
       paidAmount: Number(amountPaid) || 0,
-      paymentMethod,
+      paymentMethod: (paymentMethod || 'cash').toUpperCase(),
       notes: saleNotes || undefined,
     };
 
     if (customerMode === 'registered' && selectedCustomerId) {
-      payload.customerId = selectedCustomerId;
-    } else {
-      payload.customerName = walkInName;
-      if (walkInPhone) payload.customerPhone = walkInPhone;
+      payload.customer = selectedCustomerId;
+    } else if (customerMode === 'walk_in' && (walkInName || walkInPhone)) {
+      const walkInInfo = `Customer: ${walkInName}${walkInPhone ? ` (${walkInPhone})` : ''}`;
+      payload.notes = saleNotes ? `${saleNotes} | ${walkInInfo}` : walkInInfo;
     }
 
     createSaleMutation.mutate(payload);
@@ -278,7 +284,7 @@ export default function SalesPage() {
     setReturnTargetSale(sale);
     setReturnItems(
       sale.items.map((item) => ({
-        productId: item.product._id,
+        productId: item.product?._id || (item as any).product,
         quantity: 0,
         restock: true,
       }))
@@ -395,10 +401,10 @@ export default function SalesPage() {
                     className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="py-3.5 px-4 sm:px-6 font-mono font-semibold text-teal-600 dark:text-teal-400">
-                      {sale.invoiceNumber}
+                      {sale.saleNumber || sale.invoiceNumber}
                     </td>
                     <td className="py-3.5 px-4 text-xs text-slate-500">
-                      {formatDateTime(sale.createdAt)}
+                      {formatDateTime(sale.saleDate || sale.createdAt)}
                     </td>
                     <td className="py-3.5 px-4">
                       <p className="font-semibold text-slate-900 dark:text-white">
@@ -416,7 +422,7 @@ export default function SalesPage() {
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-right font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(sale.totalAmount, currency)}
+                      {formatCurrency(sale.grandTotal ?? sale.totalAmount ?? 0, currency)}
                     </td>
                     <td className="py-3.5 px-4 text-right text-emerald-600 font-medium">
                       {formatCurrency(sale.paidAmount, currency)}
@@ -433,15 +439,15 @@ export default function SalesPage() {
                     <td className="py-3.5 px-4">
                       <Badge
                         variant={
-                          sale.paymentStatus === 'paid'
+                          sale.paymentStatus?.toLowerCase() === 'paid'
                             ? 'success'
-                            : sale.paymentStatus === 'partial'
+                            : sale.paymentStatus?.toLowerCase() === 'partial'
                             ? 'warning'
                             : 'danger'
                         }
                         size="sm"
                       >
-                        {sale.paymentStatus.toUpperCase()}
+                        {(sale.paymentStatus || 'UNPAID').toUpperCase()}
                       </Badge>
                     </td>
                     <td className="py-3.5 px-4 sm:px-6 text-right">
@@ -829,7 +835,7 @@ export default function SalesPage() {
       <Modal
         isOpen={!!selectedInvoice}
         onClose={() => setSelectedInvoice(null)}
-        title={`Invoice ${selectedInvoice?.invoiceNumber || ''}`}
+        title={`Invoice ${selectedInvoice?.saleNumber || selectedInvoice?.invoiceNumber || ''}`}
         maxWidth="2xl"
       >
         {selectedInvoice && (
@@ -853,22 +859,22 @@ export default function SalesPage() {
 
               <div className="text-right">
                 <span className="inline-block px-2.5 py-1 bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-400 font-mono text-sm font-bold rounded-lg border border-teal-200 dark:border-teal-800">
-                  {selectedInvoice.invoiceNumber}
+                  {selectedInvoice.saleNumber || selectedInvoice.invoiceNumber}
                 </span>
                 <p className="text-xs text-slate-500 mt-1">
-                  Date: {formatDate(selectedInvoice.createdAt)}
+                  Date: {formatDate(selectedInvoice.saleDate || selectedInvoice.createdAt)}
                 </p>
                 <div className="mt-1">
                   <Badge
                     variant={
-                      selectedInvoice.paymentStatus === 'paid'
+                      selectedInvoice.paymentStatus?.toLowerCase() === 'paid'
                         ? 'success'
-                        : selectedInvoice.paymentStatus === 'partial'
+                        : selectedInvoice.paymentStatus?.toLowerCase() === 'partial'
                         ? 'warning'
                         : 'danger'
                     }
                   >
-                    {selectedInvoice.paymentStatus.toUpperCase()}
+                    {(selectedInvoice.paymentStatus || 'UNPAID').toUpperCase()}
                   </Badge>
                 </div>
               </div>
@@ -907,14 +913,23 @@ export default function SalesPage() {
                   <tr key={idx}>
                     <td className="py-2.5">
                       <p className="font-semibold text-slate-900 dark:text-white">
-                        {item.product?.name || 'Product'}
+                        {item.productName || item.product?.name || 'Product'}
                       </p>
-                      <p className="font-mono text-[10px] text-slate-400">{item.product?.sku}</p>
+                      <p className="font-mono text-[10px] text-slate-400">
+                        {item.productSku || item.product?.sku || item.product?.SKU || ''}
+                      </p>
                     </td>
                     <td className="py-2.5 text-center font-bold">{item.quantity}</td>
-                    <td className="py-2.5 text-right">{formatCurrency(item.unitPrice, currency)}</td>
+                    <td className="py-2.5 text-right">
+                      {formatCurrency(item.sellingPrice ?? item.unitPrice ?? 0, currency)}
+                    </td>
                     <td className="py-2.5 text-right font-semibold text-slate-900 dark:text-white">
-                      {formatCurrency(item.total, currency)}
+                      {formatCurrency(
+                        item.subtotal ??
+                          item.total ??
+                          item.quantity * (item.sellingPrice ?? item.unitPrice ?? 0),
+                        currency
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -934,15 +949,15 @@ export default function SalesPage() {
                     <span>-{formatCurrency(selectedInvoice.discount, currency)}</span>
                   </div>
                 )}
-                {selectedInvoice.taxAmount > 0 && (
+                {(selectedInvoice.tax ?? selectedInvoice.taxAmount ?? 0) > 0 && (
                   <div className="flex justify-between text-slate-500">
                     <span>Tax</span>
-                    <span>+{formatCurrency(selectedInvoice.taxAmount, currency)}</span>
+                    <span>+{formatCurrency(selectedInvoice.tax ?? selectedInvoice.taxAmount ?? 0, currency)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-bold text-sm text-slate-900 dark:text-white pt-1 border-t border-slate-200 dark:border-slate-700">
                   <span>Total Due</span>
-                  <span>{formatCurrency(selectedInvoice.totalAmount, currency)}</span>
+                  <span>{formatCurrency(selectedInvoice.grandTotal ?? selectedInvoice.totalAmount ?? 0, currency)}</span>
                 </div>
                 <div className="flex justify-between text-emerald-600 font-medium">
                   <span>Amount Paid</span>
@@ -1001,9 +1016,8 @@ export default function SalesPage() {
               processReturnMutation.mutate({
                 id: returnTargetSale._id,
                 payload: {
-                  items: validItems,
-                  refundAmount: Number(refundAmount),
-                  notes: returnReason,
+                  items: validItems.map((i) => ({ product: i.productId, quantity: i.quantity })),
+                  reason: returnReason || 'Customer return',
                 },
               });
             }}
@@ -1011,42 +1025,52 @@ export default function SalesPage() {
           >
             <div className="space-y-2">
               <p className="font-semibold text-slate-700 dark:text-slate-300">
-                Original Items in Invoice #{returnTargetSale.invoiceNumber}:
+                Original Items in Invoice #{returnTargetSale.saleNumber || returnTargetSale.invoiceNumber}:
               </p>
-              {returnTargetSale.items.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl flex items-center justify-between gap-3 border border-slate-200 dark:border-slate-700"
-                >
-                  <div className="flex-1">
-                    <p className="font-bold text-slate-900 dark:text-white">{item.product.name}</p>
-                    <p className="text-slate-400">Sold: {item.quantity} units @ {formatCurrency(item.unitPrice, currency)}</p>
+              {returnTargetSale.items.map((item, idx) => {
+                const prodId = item.product?._id || (item as any).product;
+                const prodName = item.productName || item.product?.name || 'Product';
+                const unitPrice = item.sellingPrice ?? item.unitPrice ?? 0;
+                return (
+                  <div
+                    key={idx}
+                    className="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl flex items-center justify-between gap-3 border border-slate-200 dark:border-slate-700"
+                  >
+                    <div className="flex-1">
+                      <p className="font-bold text-slate-900 dark:text-white">{prodName}</p>
+                      <p className="text-slate-400">
+                        Sold: {item.quantity} units @ {formatCurrency(unitPrice, currency)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-slate-500">Return Qty:</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={item.quantity}
+                        value={returnItems.find((r) => r.productId === prodId)?.quantity || 0}
+                        onChange={(e) => {
+                          const val = Math.min(item.quantity, Math.max(0, Number(e.target.value)));
+                          const updated = returnItems.map((r) =>
+                            r.productId === prodId ? { ...r, quantity: val } : r
+                          );
+                          setReturnItems(updated);
+                          // Auto-calculate suggested refund
+                          const totalReturnVal = updated.reduce((sum, r) => {
+                            const orig = returnTargetSale.items.find(
+                              (i) => (i.product?._id || (i as any).product) === r.productId
+                            );
+                            const origPrice = orig ? orig.sellingPrice ?? orig.unitPrice ?? 0 : 0;
+                            return sum + origPrice * r.quantity;
+                          }, 0);
+                          setRefundAmount(totalReturnVal);
+                        }}
+                        className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-center"
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-slate-500">Return Qty:</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={item.quantity}
-                      value={returnItems.find((r) => r.productId === item.product._id)?.quantity || 0}
-                      onChange={(e) => {
-                        const val = Math.min(item.quantity, Math.max(0, Number(e.target.value)));
-                        const updated = returnItems.map((r) =>
-                          r.productId === item.product._id ? { ...r, quantity: val } : r
-                        );
-                        setReturnItems(updated);
-                        // Auto-calculate suggested refund
-                        const totalReturnVal = updated.reduce((sum, r) => {
-                          const orig = returnTargetSale.items.find((i) => i.product._id === r.productId);
-                          return sum + (orig ? orig.unitPrice * r.quantity : 0);
-                        }, 0);
-                        setRefundAmount(totalReturnVal);
-                      }}
-                      className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-center"
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div>

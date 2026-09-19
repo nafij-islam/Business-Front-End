@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ interface Supplier {
   _id: string;
   name: string;
   company?: string;
+  companyName?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -60,7 +61,7 @@ export default function SuppliersPage() {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
       const res: any = await api.get('/suppliers', { params });
-      return res.data;
+      return extractPaginationData<Supplier>(res);
     },
   });
 
@@ -109,7 +110,7 @@ export default function SuppliersPage() {
     setEditingSupplier(supplier);
     setForm({
       name: supplier.name,
-      company: supplier.company || '',
+      company: supplier.companyName || supplier.company || '',
       phone: supplier.phone || '',
       email: supplier.email || '',
       address: supplier.address || '',
@@ -119,10 +120,18 @@ export default function SuppliersPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const payload: any = {
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      companyName: form.company?.trim() || undefined,
+      email: form.email?.trim() || undefined,
+      address: form.address?.trim() || undefined,
+    };
+
     if (editingSupplier) {
-      updateSupplierMutation.mutate({ id: editingSupplier._id, data: form });
+      updateSupplierMutation.mutate({ id: editingSupplier._id, data: payload });
     } else {
-      createSupplierMutation.mutate(form);
+      createSupplierMutation.mutate(payload);
     }
   };
 
@@ -210,8 +219,8 @@ export default function SuppliersPage() {
                   >
                     <td className="py-3.5 px-4 sm:px-6">
                       <p className="font-semibold text-slate-900 dark:text-white">{s.name}</p>
-                      {s.company && (
-                        <p className="text-xs text-slate-400 font-medium">{s.company}</p>
+                      {(s.company || s.companyName) && (
+                        <p className="text-xs text-slate-400 font-medium">{s.company || s.companyName}</p>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-xs">
@@ -347,10 +356,11 @@ export default function SuppliersPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Phone Number
+                Phone Number <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"

@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'https://business-back-end-5kc1.vercel.app/api/v1';
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -10,6 +10,64 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Robust helper to safely extract paginated data and metadata from backend API responses
+ */
+export function extractPaginationData<T>(response: any): {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+} {
+  if (!response) {
+    return { items: [], total: 0, page: 1, limit: 10, totalPages: 1 };
+  }
+
+  const rawData = response?.data !== undefined ? response.data : response;
+
+  let items: T[] = [];
+  if (Array.isArray(rawData)) {
+    items = rawData;
+  } else if (Array.isArray(rawData?.data)) {
+    items = rawData.data;
+  } else if (Array.isArray(rawData?.items)) {
+    items = rawData.items;
+  }
+
+  const meta = response?.meta?.meta || response?.meta || rawData?.meta || {};
+  const total =
+    typeof meta?.total === 'number'
+      ? meta.total
+      : typeof rawData?.total === 'number'
+        ? rawData.total
+        : items.length;
+
+  const page = meta?.page || rawData?.page || 1;
+  const limit = meta?.limit || rawData?.limit || 20;
+  const totalPages = meta?.totalPages || Math.ceil(total / (limit || 1)) || 1;
+
+  return { items, total, page, limit, totalPages };
+}
+
+/**
+ * Authenticated file download helper for CSV exports
+ */
+export async function downloadExportFile(endpoint: string, filename: string) {
+  const response = await api.get(endpoint, {
+    responseType: 'blob',
+  });
+  const blob = new Blob([response as any], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
 
 let isRefreshing = false;
 let failedQueue: Array<{

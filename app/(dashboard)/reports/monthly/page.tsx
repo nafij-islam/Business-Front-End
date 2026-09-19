@@ -47,7 +47,7 @@ export default function MonthlyReportPage() {
   });
 
   const summary = monthlyData?.financialSummary || {};
-  const daily = monthlyData?.dailyBreakdown || [];
+  const daily = monthlyData?.dailyBreakdown || monthlyData?.dailyChartData || [];
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',

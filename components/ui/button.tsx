@@ -15,7 +15,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     const variantStyles = {
       primary:
-        'bg-teal-600 hover:bg-teal-700 text-white shadow-sm hover:shadow focus:ring-teal-500',
+        'bg-[var(--theme-primary,#0d9488)] hover:opacity-90 text-white shadow-sm hover:shadow focus:ring-[var(--theme-primary,#0d9488)]',
       secondary:
         'bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-200 focus:ring-slate-400',
       outline:
@@ -27,10 +27,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     const sizeStyles = {
-      sm: 'text-xs px-2.5 py-1.5 gap-1.5 h-8',
-      md: 'text-sm px-4 py-2 gap-2 h-10',
-      lg: 'text-base px-5 py-2.5 gap-2.5 h-12',
-      icon: 'h-9 w-9 p-0',
+      sm: 'text-xs px-3 py-1.5 gap-1.5 h-8 sm:h-8 min-h-[36px]',
+      md: 'text-sm px-4 py-2 gap-2 h-10 min-h-[40px]',
+      lg: 'text-base px-5 py-2.5 gap-2.5 h-12 min-h-[48px]',
+      icon: 'h-9 w-9 min-h-[36px] min-w-[36px] p-0',
     };
 
     return (

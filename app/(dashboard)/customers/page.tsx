@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -62,7 +62,7 @@ export default function CustomersPage() {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
       const res: any = await api.get('/customers', { params });
-      return res.data;
+      return extractPaginationData<Customer>(res);
     },
   });
 
@@ -121,10 +121,18 @@ export default function CustomersPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const payload: any = {
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      email: form.email?.trim() || undefined,
+      address: form.address?.trim() || undefined,
+      notes: form.company?.trim() ? `Company: ${form.company.trim()}` : undefined,
+    };
+
     if (editingCustomer) {
-      updateCustomerMutation.mutate({ id: editingCustomer._id, data: form });
+      updateCustomerMutation.mutate({ id: editingCustomer._id, data: payload });
     } else {
-      createCustomerMutation.mutate(form);
+      createCustomerMutation.mutate(payload);
     }
   };
 
@@ -349,10 +357,11 @@ export default function CustomersPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Phone Number
+                Phone Number <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"

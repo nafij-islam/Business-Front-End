@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -22,26 +22,33 @@ import {
 } from 'lucide-react';
 
 interface PurchaseItem {
-  product: { _id: string; name: string; sku: string };
+  product: { _id: string; name: string; sku?: string; SKU?: string };
+  productName?: string;
+  productSku?: string;
   quantity: number;
   unitCost: number;
-  total: number;
+  total?: number;
+  subtotal?: number;
 }
 
 interface Purchase {
   _id: string;
   purchaseNumber: string;
-  supplier: { _id: string; name: string; phone?: string; email?: string; company?: string };
+  supplier: { _id: string; name: string; phone?: string; email?: string; company?: string; companyName?: string };
   items: PurchaseItem[];
   subtotal: number;
-  taxAmount: number;
+  tax?: number;
+  taxAmount?: number;
   shippingCost: number;
-  totalAmount: number;
+  grandTotal?: number;
+  totalAmount?: number;
   paidAmount: number;
   dueAmount: number;
-  paymentStatus: 'paid' | 'partial' | 'unpaid';
-  status: 'received' | 'pending' | 'cancelled' | 'returned';
+  paymentStatus: string;
+  status: string;
+  note?: string;
   notes?: string;
+  purchaseDate?: string;
   createdAt: string;
 }
 
@@ -101,7 +108,7 @@ export default function PurchasesPage() {
       const params: Record<string, any> = { page, limit };
       if (search) params.search = search;
       const res: any = await api.get('/purchases', { params });
-      return res.data;
+      return extractPaginationData<Purchase>(res);
     },
   });
 
@@ -110,7 +117,7 @@ export default function PurchasesPage() {
     queryKey: ['suppliers-list'],
     queryFn: async () => {
       const res: any = await api.get('/suppliers', { params: { limit: 200 } });
-      return res.data?.items || [];
+      return extractPaginationData<SupplierItem>(res).items;
     },
   });
 
@@ -119,7 +126,7 @@ export default function PurchasesPage() {
     queryKey: ['products-for-purchases'],
     queryFn: async () => {
       const res: any = await api.get('/products', { params: { limit: 500, isActive: true } });
-      return res.data?.items || [];
+      return extractPaginationData<ProductItem>(res).items;
     },
   });
 
@@ -149,7 +156,13 @@ export default function PurchasesPage() {
   });
 
   const createSupplierMutation = useMutation({
-    mutationFn: (payload: any) => api.post('/suppliers', payload),
+    mutationFn: (payload: any) =>
+      api.post('/suppliers', {
+        name: payload.name?.trim(),
+        phone: payload.phone?.trim(),
+        companyName: payload.company?.trim() || undefined,
+        email: payload.email?.trim() || undefined,
+      }),
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ['suppliers-list'] });
       setIsNewSupplierModalOpen(false);
@@ -196,17 +209,17 @@ export default function PurchasesPage() {
     if (!supplierId || purchaseLines.length === 0) return;
 
     const payload = {
-      supplierId,
+      supplier: supplierId,
       items: purchaseLines.map((l) => ({
-        productId: l.productId,
+        product: l.productId,
         quantity: Number(l.quantity),
         unitCost: Number(l.unitCost),
       })),
       shippingCost: Number(shippingCost) || 0,
-      taxAmount: Number(taxAmount) || 0,
+      tax: Number(taxAmount) || 0,
       paidAmount: Number(paidAmount) || 0,
-      paymentMethod,
-      notes: notes || undefined,
+      paymentMethod: (paymentMethod || 'CASH').toUpperCase(),
+      note: notes || undefined,
     };
 
     createPurchaseMutation.mutate(payload);
@@ -301,21 +314,23 @@ export default function PurchasesPage() {
                       {pur.purchaseNumber}
                     </td>
                     <td className="py-3.5 px-4 text-xs text-slate-500">
-                      {formatDate(pur.createdAt)}
+                      {formatDate(pur.purchaseDate || pur.createdAt)}
                     </td>
                     <td className="py-3.5 px-4">
                       <p className="font-semibold text-slate-900 dark:text-white">
                         {pur.supplier?.name}
                       </p>
-                      {pur.supplier?.company && (
-                        <p className="text-xs text-slate-400">{pur.supplier.company}</p>
+                      {(pur.supplier?.company || pur.supplier?.companyName) && (
+                        <p className="text-xs text-slate-400">
+                          {pur.supplier?.company || pur.supplier?.companyName}
+                        </p>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-center font-semibold text-slate-700 dark:text-slate-300">
                       {pur.items?.length || 0}
                     </td>
                     <td className="py-3.5 px-4 text-right font-bold text-slate-900 dark:text-white">
-                      {formatCurrency(pur.totalAmount, currency)}
+                      {formatCurrency(pur.grandTotal ?? pur.totalAmount ?? 0, currency)}
                     </td>
                     <td className="py-3.5 px-4 text-right text-emerald-600 font-medium">
                       {formatCurrency(pur.paidAmount, currency)}
@@ -332,15 +347,15 @@ export default function PurchasesPage() {
                     <td className="py-3.5 px-4">
                       <Badge
                         variant={
-                          pur.paymentStatus === 'paid'
+                          pur.paymentStatus?.toLowerCase() === 'paid'
                             ? 'success'
-                            : pur.paymentStatus === 'partial'
+                            : pur.paymentStatus?.toLowerCase() === 'partial'
                             ? 'warning'
                             : 'danger'
                         }
                         size="sm"
                       >
-                        {pur.paymentStatus.toUpperCase()}
+                        {(pur.paymentStatus || 'UNPAID').toUpperCase()}
                       </Badge>
                     </td>
                     <td className="py-3.5 px-4 sm:px-6 text-right">
@@ -734,10 +749,20 @@ export default function PurchasesPage() {
                 )}
               </div>
               <div className="text-right">
-                <Badge variant={selectedPurchase.paymentStatus === 'paid' ? 'success' : 'warning'}>
-                  {selectedPurchase.paymentStatus.toUpperCase()}
+                <Badge
+                  variant={
+                    selectedPurchase.paymentStatus?.toLowerCase() === 'paid'
+                      ? 'success'
+                      : selectedPurchase.paymentStatus?.toLowerCase() === 'partial'
+                      ? 'warning'
+                      : 'danger'
+                  }
+                >
+                  {(selectedPurchase.paymentStatus || 'UNPAID').toUpperCase()}
                 </Badge>
-                <p className="text-slate-400 mt-1">{formatDateTime(selectedPurchase.createdAt)}</p>
+                <p className="text-slate-400 mt-1">
+                  {formatDateTime(selectedPurchase.purchaseDate || selectedPurchase.createdAt)}
+                </p>
               </div>
             </div>
 
@@ -754,12 +779,12 @@ export default function PurchasesPage() {
                 {selectedPurchase.items?.map((item, idx) => (
                   <tr key={idx}>
                     <td className="py-2 font-medium text-slate-900 dark:text-white">
-                      {item.product?.name}
+                      {item.productName || item.product?.name || 'Product'}
                     </td>
                     <td className="py-2 text-center font-bold">{item.quantity}</td>
                     <td className="py-2 text-right">{formatCurrency(item.unitCost, currency)}</td>
                     <td className="py-2 text-right font-semibold">
-                      {formatCurrency(item.total, currency)}
+                      {formatCurrency(item.subtotal ?? item.total ?? item.quantity * item.unitCost, currency)}
                     </td>
                   </tr>
                 ))}
@@ -771,21 +796,21 @@ export default function PurchasesPage() {
                 <span>Subtotal</span>
                 <span>{formatCurrency(selectedPurchase.subtotal, currency)}</span>
               </div>
-              {selectedPurchase.shippingCost > 0 && (
+              {(selectedPurchase.shippingCost || 0) > 0 && (
                 <div className="flex justify-between text-slate-500">
                   <span>Shipping</span>
                   <span>+{formatCurrency(selectedPurchase.shippingCost, currency)}</span>
                 </div>
               )}
-              {selectedPurchase.taxAmount > 0 && (
+              {(selectedPurchase.tax ?? selectedPurchase.taxAmount ?? 0) > 0 && (
                 <div className="flex justify-between text-slate-500">
                   <span>Tax</span>
-                  <span>+{formatCurrency(selectedPurchase.taxAmount, currency)}</span>
+                  <span>+{formatCurrency(selectedPurchase.tax ?? selectedPurchase.taxAmount ?? 0, currency)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold text-sm text-slate-900 dark:text-white pt-1 border-t border-slate-200 dark:border-slate-700">
                 <span>Total Amount</span>
-                <span>{formatCurrency(selectedPurchase.totalAmount, currency)}</span>
+                <span>{formatCurrency(selectedPurchase.grandTotal ?? selectedPurchase.totalAmount ?? 0, currency)}</span>
               </div>
               <div className="flex justify-between text-emerald-600 font-medium">
                 <span>Paid</span>

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, extractPaginationData } from '@/lib/api';
 import { useBusinessSettings } from '@/providers/theme-provider';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -25,18 +25,22 @@ import {
 interface ProductItem {
   _id: string;
   name: string;
-  sku: string;
+  sku?: string;
+  SKU?: string;
   category?: { name: string };
   purchasePrice: number;
   sellingPrice: number;
   currentStock: number;
-  lowStockAlert: number;
+  lowStockThreshold?: number;
+  lowStockAlert?: number;
   unit?: { symbol: string };
 }
 
 interface StockTransaction {
   _id: string;
-  product: { _id: string; name: string; sku: string };
+  product: { _id: string; name: string; sku?: string; SKU?: string };
+  productName?: string;
+  productSku?: string;
   type: string;
   quantity: number;
   previousStock: number;
@@ -45,8 +49,9 @@ interface StockTransaction {
   referenceType?: string;
   referenceId?: string;
   notes?: string;
+  note?: string;
   reason?: string;
-  performedBy?: { name: string };
+  performedBy?: { name?: string; firstName?: string; lastName?: string };
   createdAt: string;
 }
 
@@ -105,7 +110,7 @@ export default function InventoryPage() {
       const res: any = await api.get('/products', {
         params: { page, limit, search: search || undefined },
       });
-      return res.data;
+      return extractPaginationData<ProductItem>(res);
     },
   });
 
@@ -114,7 +119,7 @@ export default function InventoryPage() {
     queryKey: ['all-products-dropdown'],
     queryFn: async () => {
       const res: any = await api.get('/products', { params: { limit: 500, isActive: true } });
-      return res.data?.items || [];
+      return extractPaginationData<ProductItem>(res).items;
     },
   });
 
@@ -126,7 +131,7 @@ export default function InventoryPage() {
       const res: any = await api.get('/inventory/transactions', {
         params: { page, limit },
       });
-      return res.data;
+      return extractPaginationData<StockTransaction>(res);
     },
   });
 
@@ -370,7 +375,8 @@ export default function InventoryPage() {
                     products.map((item) => {
                       const totalCost = item.currentStock * item.purchasePrice;
                       const totalRetail = item.currentStock * item.sellingPrice;
-                      const isLow = item.currentStock > 0 && item.currentStock <= item.lowStockAlert;
+                      const lowThreshold = item.lowStockThreshold ?? item.lowStockAlert ?? 5;
+                      const isLow = item.currentStock > 0 && item.currentStock <= lowThreshold;
                       const isOut = item.currentStock <= 0;
 
                       return (
@@ -383,7 +389,7 @@ export default function InventoryPage() {
                               {item.name}
                             </p>
                             <p className="text-xs font-mono text-slate-400 mt-0.5">
-                              {item.sku}
+                              {item.SKU || item.sku}
                             </p>
                           </td>
                           <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
@@ -520,18 +526,18 @@ export default function InventoryPage() {
                         </td>
                         <td className="py-3.5 px-4">
                           <p className="font-semibold text-slate-900 dark:text-white">
-                            {tx.product?.name || 'Deleted Product'}
+                            {tx.productName || tx.product?.name || 'Deleted Product'}
                           </p>
                           <p className="text-xs font-mono text-slate-400">
-                            {tx.product?.sku}
+                            {tx.productSku || tx.product?.sku || tx.product?.SKU || ''}
                           </p>
                         </td>
                         <td className="py-3.5 px-4">
                           <Badge
                             variant={
-                              tx.type.includes('in') || tx.type.includes('purchase')
+                              tx.type.toLowerCase().includes('in') || tx.type.toLowerCase().includes('purchase')
                                 ? 'success'
-                                : tx.type.includes('sale') || tx.type.includes('out')
+                                : tx.type.toLowerCase().includes('sale') || tx.type.toLowerCase().includes('out') || tx.type.toLowerCase().includes('damage')
                                 ? 'danger'
                                 : 'warning'
                             }
@@ -553,10 +559,10 @@ export default function InventoryPage() {
                           {tx.previousStock} &rarr; <strong className="text-slate-900 dark:text-white">{tx.newStock}</strong>
                         </td>
                         <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-300">
-                          <div>{tx.reason || tx.notes || '-'}</div>
+                          <div>{tx.reason || tx.note || tx.notes || '-'}</div>
                         </td>
                         <td className="py-3.5 px-4 sm:px-6 text-xs text-slate-500">
-                          {tx.performedBy?.name || 'System'}
+                          {tx.performedBy?.name || (tx.performedBy?.firstName ? `${tx.performedBy.firstName} ${tx.performedBy.lastName || ''}` : 'System')}
                         </td>
                       </tr>
                     );
@@ -610,11 +616,11 @@ export default function InventoryPage() {
           onSubmit={(e) => {
             e.preventDefault();
             stockInMutation.mutate({
-              productId: stockInForm.productId,
+              product: stockInForm.productId,
               quantity: Number(stockInForm.quantity),
-              unitCost: Number(stockInForm.unitCost),
+              unitCost: Number(stockInForm.unitCost) || undefined,
+              referenceNumber: stockInForm.batchNumber || undefined,
               note: stockInForm.note || undefined,
-              batchNumber: stockInForm.batchNumber || undefined,
             });
           }}
           className="space-y-4"
@@ -732,10 +738,17 @@ export default function InventoryPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            const reasonMap: Record<string, string> = {
+              damage: 'DAMAGE',
+              expired: 'DAMAGE',
+              lost: 'LOST',
+              internal_use: 'PERSONAL_USE',
+              correction: 'ADJUSTMENT',
+            };
             stockOutMutation.mutate({
-              productId: stockOutForm.productId,
+              product: stockOutForm.productId,
               quantity: Number(stockOutForm.quantity),
-              reason: stockOutForm.reason,
+              reason: reasonMap[stockOutForm.reason] || 'OTHER',
               note: stockOutForm.note || undefined,
             });
           }}
@@ -838,9 +851,9 @@ export default function InventoryPage() {
           onSubmit={(e) => {
             e.preventDefault();
             adjustMutation.mutate({
-              productId: adjustForm.productId,
-              actualQuantity: Number(adjustForm.actualQuantity),
-              reason: adjustForm.reason,
+              product: adjustForm.productId,
+              newStock: Number(adjustForm.actualQuantity),
+              reason: adjustForm.reason || 'Physical count audit',
               note: adjustForm.note || undefined,
             });
           }}
